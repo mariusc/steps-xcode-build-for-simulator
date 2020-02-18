@@ -119,6 +119,15 @@ inputs:
       value_options:
         - "yes"
         - "no"
+  - export_artifacts_after_build: "no"
+    opts:
+      title: Exports the artifacts after the build
+      summary: After the build succeeds, it tries to export the artifacts from Derived Data
+      description: |-
+        If there's an error while exporting, the whole step will fail and the buidl will be considered as failed.
+      value_options:
+        - "yes"
+        - "no"
   - cache_level: swift_packages
     opts:
       title: Enable caching of Swift Package Manager packages
