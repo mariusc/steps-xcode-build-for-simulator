@@ -55,6 +55,7 @@ type Config struct {
 	DisableIndexWhileBuilding bool   `env:"disable_index_while_building,opt[yes,no]"`
 	VerboseLog                bool   `env:"verbose_log,required"`
 	CacheLevel                string `env:"cache_level,opt[none,swift_packages]"`
+	ExportArtifactsAfterBuild bool   `env:"export_artifacts_after_build,opt[yes,no]"`
 }
 
 func main() {
@@ -241,73 +242,74 @@ func main() {
 				if err := utils.ExportOutputFileContent(rawXcodeBuildOut, rawXcodebuildOutputLogPath, bitriseXcodeRawResultTextEnvKey); err != nil {
 					log.Warnf("Failed to export %s, error: %s", bitriseXcodeRawResultTextEnvKey, err)
 				} else {
-					log.Warnf(`You can find the last couple of lines of Xcode's build log above, but the full log is also available in the raw-xcodebuild-output.log
-The log file is stored in $BITRISE_DEPLOY_DIR, and its full path is available in the $BITRISE_XCODE_RAW_RESULT_TEXT_PATH environment variable
-(value: %s)`, rawXcodebuildOutputLogPath)
+					log.Warnf(`You can find the last couple of lines of Xcode's build log above, but the full log is also available in the raw-xcodebuild-output.log The log file is stored in $BITRISE_DEPLOY_DIR, and its full path is available in the $BITRISE_XCODE_RAW_RESULT_TEXT_PATH environment variable (value: %s)`, rawXcodebuildOutputLogPath)
 				}
 			}
 			failf("Build failed, error: %s", err)
 		}
 	}
 
-	//
-	// Export artifacts
-	var exportedArtifacts []string
-	{
-		fmt.Println()
-		log.Infof("Copy artifacts from Derived Data to %s", absOutputDir)
-
-		proj, _, err := findBuiltProject(absProjectPath, cfg.Scheme, cfg.Configuration)
-		if err != nil {
-			failf("Failed to open xcproj - (%s), error:", absProjectPath, err)
-		}
-
-		customOptions, err := shellquote.Split(cfg.XcodebuildOptions)
-		if err != nil {
-			failf("Failed to shell split XcodebuildOptions (%s), error: %s", cfg.XcodebuildOptions)
-		}
-
-		// Get the simulator name
+	if cfg.ExportArtifactsAfterBuild {
+		//
+		// Export artifacts
+		var exportedArtifacts []string
 		{
-			simulatorName := iOSSimName
-			if cfg.SimulatorPlatform == "tvOS" {
-				simulatorName = tvOSSimName
+			fmt.Println()
+			log.Infof("Copy artifacts from Derived Data to %s", absOutputDir)
+	
+			proj, _, err := findBuiltProject(absProjectPath, cfg.Scheme, cfg.Configuration)
+			if err != nil {
+				failf("Failed to open xcproj - (%s), error:", absProjectPath, err)
 			}
-
-			customOptions = append(customOptions, "-sdk")
-			customOptions = append(customOptions, simulatorName)
+	
+			customOptions, err := shellquote.Split(cfg.XcodebuildOptions)
+			if err != nil {
+				failf("Failed to shell split XcodebuildOptions (%s), error: %s", cfg.XcodebuildOptions)
+			}
+	
+			// Get the simulator name
+			{
+				simulatorName := iOSSimName
+				if cfg.SimulatorPlatform == "tvOS" {
+					simulatorName = tvOSSimName
+				}
+	
+				customOptions = append(customOptions, "-sdk")
+				customOptions = append(customOptions, simulatorName)
+			}
+	
+			schemeBuildDir, err := buildTargetDirForScheme(proj, absProjectPath, cfg.Scheme, cfg.Configuration, customOptions...)
+			if err != nil {
+				failf("Failed to get scheme (%s) build target dir, error: %s", err)
+			}
+	
+			log.Debugf("Scheme build dir: %s", schemeBuildDir)
+	
+			// Export the artifact from the build dir to the output_dir
+			if exportedArtifacts, err = exportArtifacts(proj, cfg.Scheme, schemeBuildDir, cfg.Configuration, cfg.SimulatorPlatform, absOutputDir); err != nil {
+				failf("Failed to export the artifacts, error: %s", err)
+			}
 		}
-
-		schemeBuildDir, err := buildTargetDirForScheme(proj, absProjectPath, cfg.Scheme, cfg.Configuration, customOptions...)
-		if err != nil {
-			failf("Failed to get scheme (%s) build target dir, error: %s", err)
-		}
-
-		log.Debugf("Scheme build dir: %s", schemeBuildDir)
-
-		// Export the artifact from the build dir to the output_dir
-		if exportedArtifacts, err = exportArtifacts(proj, cfg.Scheme, schemeBuildDir, cfg.Configuration, cfg.SimulatorPlatform, absOutputDir); err != nil {
-			failf("Failed to export the artifacts, error: %s", err)
-		}
-	}
-
-	//
-	// Export output
-	fmt.Println()
-	log.Infof("Exporting outputs")
-	if len(exportedArtifacts) == 0 {
-		log.Warnf("No exportable artifact have found.")
-	} else {
-		mainTargetAppPath, pathMap, err := exportOutput(exportedArtifacts)
-		if err != nil {
-			failf("Failed to export outputs (BITRISE_APP_DIR_PATH & BITRISE_APP_DIR_PATH_LIST), error: %s", err)
-		}
-
-		log.Donef("BITRISE_APP_DIR_PATH -> %s", mainTargetAppPath)
-		log.Donef("BITRISE_APP_DIR_PATH_LIST -> %s", pathMap)
-
+	
+		//
+		// Export output
 		fmt.Println()
-		log.Donef("You can find the exported artifacts in: %s", absOutputDir)
+		log.Infof("Exporting outputs")
+		if len(exportedArtifacts) == 0 {
+			log.Warnf("No exportable artifact have found.")
+		} else {
+			mainTargetAppPath, pathMap, err := exportOutput(exportedArtifacts)
+			if err != nil {
+				failf("Failed to export outputs (BITRISE_APP_DIR_PATH & BITRISE_APP_DIR_PATH_LIST), error: %s", err)
+			}
+	
+			log.Donef("BITRISE_APP_DIR_PATH -> %s", mainTargetAppPath)
+			log.Donef("BITRISE_APP_DIR_PATH_LIST -> %s", pathMap)
+	
+			fmt.Println()
+			log.Donef("You can find the exported artifacts in: %s", absOutputDir)
+		}
+
 	}
 
 	// Cache swift PM
